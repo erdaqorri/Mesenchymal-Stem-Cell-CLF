@@ -1,0 +1,414 @@
+---
+title: 'Mesenchymal Stem Cell CLF Single Cell Analysis'
+author: "Erda Alexandria Qorri"
+date: "2024-09-20"
+output:
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+```
+
+### 1. Data Import
+
+```{r load_libraries, echo=FALSE, message=FALSE}
+library(SingleCellExperiment)
+library(Seurat)
+library(SeuratObject)
+library(tidyverse) 
+library(Matrix)
+library(scales)
+library(cowplot) 
+library(RCurl) 
+library(magrittr) 
+library(ggplot2)
+library(dplyr) 
+library(patchwork) 
+library(ggpubr)
+```
+
+```{r load_filtered_mtx, echo=TRUE, message=FALSE}
+
+# Takes as input the filtered matrices
+filtered_mtx_dir <- "/home/alexia/Desktop/Transcriptomics/group/Not_completed/emese_dog_single_cell/genome_99/"
+# filtered_mtx_dir <- "/path/to/filtered_mtx/"
+
+filenames <- c("p2_99_filtered_mtx", "p6_99_filtered_mtx")
+
+seurat_objects <- list()
+
+for (file in filenames) {
+  # Read 10X data
+  seurat_data <- Read10X(data.dir = file.path(filtered_mtx_dir, file))
+  
+  # Create a Seurat object
+  seurat_object <- CreateSeuratObject(counts = seurat_data,
+                                      min.features = 200,
+                                      min.cells = 3,
+                                      project = file)
+  
+  # Store the Seurat object in the list
+  seurat_objects[[file]] <- seurat_object
+}
+
+# Merge Seurat objects
+seurat_obj_merged_99 <- merge(x = seurat_objects[["p2_99_filtered_mtx"]],
+                              y = seurat_objects[["p6_99_filtered_mtx"]],
+                              add.cell.ids = c("P2", "P6"))
+
+# Extract metadata for later use
+metadata_99 <- seurat_obj_merged_99@meta.data
+
+# Add Sample ID to each cell
+metadata_99 <- metadata_99 %>% 
+  mutate(Cells = rownames(metadata_99),
+         Sample = case_when(
+           str_detect(Cells, "^P2") ~ "P2",
+           str_detect(Cells, "^P6") ~ "P6",
+ TRUE ~ NA_character_))
+
+metadata_99 <- as.data.frame(metadata_99)
+
+# Update the Seurat object with the modified metadata
+seurat_obj_merged_99@meta.data <- metadata_99
+```
+
+## Part 1: Exploring Sample Quality
+
+1.1 Number of captured cells
+
+```{r qc, echo=TRUE, message=FALSE}
+
+cell_number_plot <- metadata_99 %>%
+   ggplot(aes(x = Sample, fill = Sample)) +
+   geom_bar() +
+   theme(plot.title = element_text(hjust = 0.5, face = "bold")) +
+   ggtitle("Cell Number") +
+   scale_fill_manual(values = c("darkgreen", "#ff7f0e"))
+
+print(cell_number_plot)
+```
+
+1.2 Number of features (genes) vs Number of UMIs
+
+```{r feature_scatter, echo=TRUE, message=FALSE}
+
+feature_scatter_plot <- FeatureScatter(seurat_obj_merged_99, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+
+print(feature_scatter_plot)
+```
+
+1.3 Exploring Mitochondrial contamination
+
+**Note**: For this project we utilized **Ensembl Release 99** of *Canis lupus familiaris*. Later releases were not used because they lack annotations for the mitochondrial genome. Mitochondrial genes were identified using the regular expression pattern "\^MT". Among the 13 mitochondrial genes in the dog genome, three genes- COX3, NDL4, and ND5—were retrieved separately and included in the total count of mitochondrial genes.
+
+```{r mt_contamination, echo=TRUE, message=FALSE}
+
+library(AnnotationHub)
+library(AnnotationDbi)
+library(ensembldb)
+
+# Initiatlize AnnotationHub
+AH = AnnotationHub()
+
+# Query ENSEMBL
+ensembl = query(AH, "ENSEMBL")
+grep("Canis", (unique(ensembl$species)), value= TRUE)
+
+# Specify release 99
+ensembl_canis <- query(AH, c("EnsDb", "Canis lupus familiaris", 99))
+
+if (length(ensembl_canis) == 0) {
+   stop("Unable to retrieve the Ensembl release. Check AnnotationHub command!")
+}
+
+edb_clf <- ensembl_canis[["AH78741"]]
+
+annotations_clf <- genes(edb_clf,
+                         return.type = "data.frame")
+
+# Extract mitochondrial genes
+mito_genes <- annotations_clf %>%
+  dplyr::filter(seq_name == "MT" & gene_biotype == "protein_coding")
+
+# Extract genes without the "MT" pattern
+gene_counts <- GetAssayData(object = seurat_obj_merged_99, slot = "counts")
+
+mt_spec_genes <- c("COX3" = "\\bCOX3\\b", 
+                   "ND4L" = "\\bND4L\\b", 
+                   "ND5" = "\\bND5\\b")
+
+for (gene in names(mt_spec_genes)) {
+  seurat_obj_merged_99[[paste0("pct.mt", tolower(gene))]] <-
+    PercentageFeatureSet(seurat_obj_merged_99,
+                         pattern = mt_spec_genes[[gene]],
+                         assay = "RNA")
+}
+
+# Calculate the total mitochondrial percentage of the genes captured by the MT pattern
+seurat_obj_merged_99[["pct.mt"]] <- PercentageFeatureSet(seurat_obj_merged_99, 
+                                                         pattern = "^MT-",
+                                                         assay = "RNA")
+
+# Update the metadata of the seurat object and calculate the total mitochondrial percentage
+metadata_99 <- seurat_obj_merged_99@meta.data
+
+metadata_99 <- metadata_99 %>%
+   mutate(total_mt = rowSums(across(starts_with("pct.mt"))))
+
+# Assign updated metadata back to the Seurat object
+seurat_obj_merged_99@meta.data <- metadata_99
+```
+
+1.4 Quality Analysis of Features, UMI Counts, and Mitochondrial Distribution
+
+```{r vln_plot_featurs_umi_mt, echo=TRUE, message=FALSE}
+vln_features_mt_plot <- VlnPlot(seurat_obj_merged_99, features = c("nFeature_RNA", "nCount_RNA", "total_mt"), ncol = 3)
+
+print(vln_features_mt_plot)
+```
+
+1.5 Joint Quality Control: Correlation Between Features and UMI Counts with Mitochondrial Read Content Distribution
+
+```{r joint_qc_features_umi, echo=FALSE, message=FALSE}
+
+ joint_feature_qc <- metadata_99 %>% 
+  ggplot(aes(x=nCount_RNA, y=nFeature_RNA, color=total_mt)) + 
+  geom_point() + 
+  scale_colour_gradient(low = "blue", high = "red") +
+  stat_smooth(method=lm) +
+  scale_x_log10() + 
+  scale_y_log10() + 
+  theme_classic() +
+  geom_vline(xintercept = 650) +
+  geom_hline(yintercept = 550) +
+  facet_wrap(~Sample)
+
+print(joint_feature_qc)
+```
+
+## Part 2: Filtering
+
+```{r filtering, echo=TRUE, message=FALSE}
+
+filtered_seurat_obj_merged_99 <- subset(x = seurat_obj_merged_99, 
+                                      subset= (nCount_RNA >= 650) &
+                                        (nCount_RNA < 37000) &
+                                        (nFeature_RNA >= 550) &
+                                        (nFeature_RNA < 6500) &
+                                        total_mt < 10)
+```
+
+## Post-filtering Quality Control
+
+2.1 Joint QC
+
+```{r, post_filtering_joint_qc, echo=TRUE, message=FALSE}
+
+ filtered_joint_qc <- filtered_seurat_obj_merged_99@meta.data %>% 
+  ggplot(aes(x=nCount_RNA, y=nFeature_RNA, color=total_mt)) + 
+  geom_point() + 
+  scale_colour_gradient(low = "blue", high = "red") +
+  stat_smooth(method=lm) +
+  scale_x_log10() + 
+  scale_y_log10() + 
+  theme_classic() +
+  geom_vline(xintercept = 650) +
+  geom_hline(yintercept = 550) +
+  facet_wrap(~Sample)
+
+print(filtered_joint_qc)
+```
+
+## Gene-level filtering
+
+```{r, gene_level_filtering, echo=TRUE, message=FALSE}
+
+counts <- GetAssayData(object = filtered_seurat_obj_merged_99, slot = "counts")
+
+filtered_counts <- counts[rowSums(counts > 0) >= 10, ]
+
+filtered_seurat_99_adjusted_gf <- CreateSeuratObject(filtered_counts, meta.data = filtered_seurat_obj_merged_99@meta.data)
+# 
+# # Visually check the filtering
+# 
+# filtered_seurat_99_adjusted_gf_plot <- filtered_seurat_99_adjusted_gf@meta.data %>% 
+#   ggplot(aes(x=nCount_RNA, y=nFeature_RNA, color=total_mt)) + 
+#   geom_point() + 
+#   scale_colour_gradient(low = "blue", high = "red") +
+#   stat_smooth(method=lm) +
+#   scale_x_log10() + 
+#   scale_y_log10() + 
+#   theme_classic() +
+#   geom_vline(xintercept = 650) +
+#   geom_hline(yintercept = 550) +
+#   facet_wrap(~Sample)
+
+# print(filtered_seurat_99_adjusted_gf_plot)
+```
+
+# Part 3: Normalization and Clustering
+
+3.1 Normalization
+
+```{r, normalization, echo=TRUE, message=TRUE}
+# Normalize using the default seurat command Normalize
+seurat_filtered_norm <- NormalizeData(filtered_seurat_99_adjusted_gf)
+
+# Identify variable features, the number of features we limit at 2000
+seurat_filtered_norm <- FindVariableFeatures(seurat_filtered_norm, selection.method = "vst", nfeatures = 2000)
+
+```
+
+3.2 Scaling
+
+```{r, scaling, echo=TRUE, message=TRUE}
+# Scale the data to standardize the expression values for each gene across all cells. The default scaling method centers and scales the data to have a mean of zero and a standard deviation of one
+seurat_filtered_norm_scaled <- ScaleData(seurat_filtered_norm, features = VariableFeatures(object = seurat_filtered_norm))
+
+```
+
+3.3 Principle Component Analysis
+
+```{r, pca_analysis, echo=TRUE, message=TRUE}
+# PCA on the normalized and scaled seurat object
+seurat_filtered_norm_scaled <- RunPCA(
+   seurat_filtered_norm_scaled,
+   features = VariableFeatures(object = seurat_filtered_norm_scaled),
+   verbose = FALSE
+)
+
+# Visualize the first 2 principle components
+pca_plot <- DimPlot(seurat_filtered_norm_scaled, reduction = "pca")
+
+print(pca_plot)
+
+# Elbow plot to aid in the selection of the principal components for the UMAP clustering
+elbow_plot <- ElbowPlot(seurat_filtered_norm_scaled)
+
+print(elbow_plot)
+```
+
+3.4 UMAP Clustering
+
+Upon visual inspection of the elbow plot, we deemed appropriate to select the first 10 principle components as that it is when the variance reclines.
+
+```{r, umap_clustering, echo=TRUE, message=TRUE}
+# First we apply FindNeighbors which identifies the nearest neighbors for each cell based on their gene expression profiles and outputs then as a graph where the cells (nodes) are connected to their nearest neighbors (edges)
+seurat_filtered_norm_scaled <- FindNeighbors(seurat_filtered_norm_scaled, dims = 1:10)
+
+# FindClusters was used to group cells with similar expression patterns to identify distinct cell populations or states within the dataset
+seurat_filtered_norm_scaled <- FindClusters(seurat_filtered_norm_scaled, resolution = 0.2)
+
+# Apply UMAP clustering to the identified populations
+seurat_filtered_norm_scaled <- RunUMAP(seurat_filtered_norm_scaled, dims = 1:10)
+
+# Visualize the UMAP Clustering
+# Separated by sample of origin
+umap_filtered_plot <- DimPlot(seurat_filtered_norm_scaled, reduction = "umap", group.by = "Sample",
+                       pt.size = 0.5,
+                       cols = c("#0d1b53", "#fe828c"))
+
+print(umap_filtered_plot)
+
+
+# All the identified cell populations
+umap_populations_plot <- DimPlot(seurat_filtered_norm_scaled, reduction = "umap", label = TRUE,
+                label.size = 7,
+                pt.size = 0.5,
+                label.color = "black",
+                cols = c("#ad497b", "#cb98dc", "#a6cd8e", "#3496BB", "#92e3de", "#5c7650", "#e94560", "#FFFF00FD"))
+
+print(umap_populations_plot)
+```
+
+# Part 4: Find the correct resolution
+
+To determine the optimal resolution for our dataset, we tested the following resolution values: *0.2, 0.6, 0.8, 1.0, 1.4*.
+
+```{r, determine_resolution, echo=TRUE, message=FALSE}
+seurat_filtered_norm_scaled_res_screen <- seurat_filtered_norm_scaled
+
+seurat_filtered_norm_scaled_res_screen <- FindClusters(seurat_filtered_norm_scaled_res_screen, resolution = c(0.2, 0.6, 0.8, 1.0, 1.4))
+
+# Resolution: 0.2 
+Idents(object = seurat_filtered_norm_scaled_res_screen) <- "RNA_snn_res.0.2"
+
+resolution_0.2 <- DimPlot(seurat_filtered_norm_scaled_res_screen,
+                          reduction = "umap",
+                          label.box = TRUE,
+                          label = TRUE,
+                          label.size = 4,
+                          cols = c("#ad497b", "#cb98dc", "#a6cd8e", "#3496BB", "#92e3de", "#5c7650", "#e94560", "#FFFF00FD"))
+
+# print(resolution_0.2)
+
+# Resolution 0.6
+Idents(object = seurat_filtered_norm_scaled_res_screen) <- "RNA_snn_res.0.6"
+
+resolution_0.6 <- DimPlot(seurat_filtered_norm_scaled_res_screen,
+        reduction = "umap",
+        label = TRUE,
+        label.size = 6)
+
+# print(resolution_0.6)
+
+# Resolution 0.8
+Idents(object = seurat_filtered_norm_scaled_res_screen) <- "RNA_snn_res.0.8"
+
+resolution_0.8 <- DimPlot(seurat_filtered_norm_scaled_res_screen,
+                          reduction = "umap",
+                          label = TRUE,
+                          label.size = 6)
+
+# print(resolution_0.8)
+
+# Resolution 1.0
+Idents(object = seurat_filtered_norm_scaled_res_screen) <- "RNA_snn_res.1"
+
+resolution_1.0 <- DimPlot(seurat_filtered_norm_scaled_res_screen,
+                          reduction = "umap",
+                          label = TRUE,
+                          label.size = 6)
+
+# print(resolution_1.0)
+
+# Resolution 1.4
+Idents(object = seurat_filtered_norm_scaled_res_screen) <- "RNA_snn_res.1.4"
+
+resolution_1.4 <- DimPlot(seurat_filtered_norm_scaled_res_screen,
+                          reduction = "umap",
+                          label = TRUE,
+                          label.size = 6)
+
+# print(resolution_1.4)
+
+```
+
+# Part 5: Intercluster Comparison, identifying markers
+
+```{r, marker_identification, echo=TRUE, message=TRUE}
+
+# FindMarkers: intercluster comparison 1,2,5,6 vs 0,3,4,7
+
+cluster1256v0347markers <- FindMarkers(filtered_seurat_99_adjusted_gf,
+
+                                       ident.1 = c(1,2,5,6),
+
+                                       ident.2 = c(0,3,4,7),
+
+                                       only.pos = FALSE,
+
+                                       logfc.threshold = 0.25,
+
+                                       min.pct = 0.25)
+
+# FindAllMarkers
+
+combined_markers <- FindAllMarkers(object = filtered_seurat_99_adjusted_gf,
+
+                                   logfc.threshold = 0.25,
+
+                                   only.pos = TRUE)
+```
