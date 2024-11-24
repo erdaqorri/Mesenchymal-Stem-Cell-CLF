@@ -5,7 +5,7 @@
 This repository contains the code for the project *"Integrating bulk RNA sequencing and single-cell sequencing to identify a comprehensive panel of senescence markers in senescent canine MSC populations."* 
 
 It includes scripts for:  
-- Processing RNA and single-cell RNA sequencing data.  
+- Processing RNA and Single-Cell RNA sequencing data.  
 - Data preprocessing and visualization.
 
 ## Genome version
