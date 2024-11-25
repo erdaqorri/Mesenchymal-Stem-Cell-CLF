@@ -3,7 +3,7 @@ library(Seurat)
 library(SeuratObject)
 library(patchwork)
 
-# identify the cell populations using resolution 0.2
+# Identify the cell populations using resolution 0.2
 seurat_obj_filtered_scaled <- FindClusters(seurat_obj_filtered_scaled, resolution = c(0.2))
 
 Idents(object = seurat_obj_filtered_scaled) <- "RNA_snn_res.0.2"
