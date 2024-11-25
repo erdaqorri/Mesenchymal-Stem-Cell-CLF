@@ -4,7 +4,6 @@
 # Input data: supplementary table 10
 
 supplementary_table_10_df <- read.csv("/path/Supplementary Table 10.csv")
-supplementary_table_10_df <- read.csv("~/Downloads/Supplementary Table 10.csv")
 
 # Define cluster order based on their Passage status
 subcluster_order <- c(0, 3, 4, 7, 1, 2, 5, 6)
