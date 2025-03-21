@@ -49,8 +49,8 @@ This directory contains the code to reproduce the RNA-Seq data analysis. All the
 
 ## Data Availability
 
-1. The raw *Single Cell RNA-Seq* FASTQ files are available in the SRA under accession **[enter accession]** and can be downloaded from **[enter link]**.
-2. The raw *RNA-Seq* FASTQ files are available in the SRA under accession **[enter accession]** and can be downloaded from **[enter link]**.
+1. The raw *Single Cell RNA-Seq* FASTQ files are available in the SRA under accession **PRJNA1235986** and can be downloaded from **[enter link]**.
+2. The raw *RNA-Seq* FASTQ files are available in the SRA under accession **PRJNA1235683** and can be downloaded from **[enter link]**.
 3. Canis lupus familiaris cell cycle genes are available for download from the Zenodo link: **[enter link]**.
 
 ## Contact Information
