@@ -16,8 +16,8 @@ library(ggpubr)
 library(glmGamPoi)
 
 # Load the filtered seurat object assays for both the first and second run
-seurat_filtered_article_samples_gf <- readRDS("/home/meteor/scrna/filtered_seurat_99_adjusted_gf.rsd")
-heidelberg_filtered_seurat_99_adjusted_gf <- readRDS("/home/meteor/scrna/heidelberg_filtered_seurat_99_adjusted_gf.rds")
+run_1_filtered <- readRDS("filtered_run1.rsd")
+run_2_no_mito_filtered <- readRDS("filtered_run2.rds")
 
 # The filtered matrices from the second run do not contain the mitochondrial reads and information which was taken into account in the first run
 # The reads mapping to the mitochondrial genes were removed from first run to avoid bias during feature gene and anchor gene identification
@@ -26,23 +26,23 @@ heidelberg_filtered_seurat_99_adjusted_gf <- readRDS("/home/meteor/scrna/heidelb
 dog_mt_genes <- c("MT-ND1", "MT-ND2", "MT-CO1", "MT-CO2", "MT-ATP8", "MT-ATP6",
                   "COX3", "MT-ND3", "ND4L", "MT-ND4", "ND5", "MT-ND6", "MT-CYB")
 
-mt_in_data <- intersect(dog_mt_genes, rownames(seurat_filtered_article_samples_gf))
+mt_in_data <- intersect(dog_mt_genes, rownames(run_1_filtered))
 
-seurat_article_no_mito <- subset(
-  seurat_filtered_article_samples_gf,
-  features = setdiff(rownames(seurat_filtered_article_samples_gf), mt_in_data)
+run_1_no_mito_filtered <- subset(
+  run_1_filtered,
+  features = setdiff(rownames(run_1_filtered), mt_in_data)
 )
 
 # Check if the filtering worked properly
-AverageExpression(seurat_article_no_mito, features = dog_mt_genes)$RNA
+AverageExpression(run_1_no_mito_filtered, features = dog_mt_genes)$RNA
 
 #################################### Integration with no mt genes ####################################
-seurat_obj_list <- list("Run1" = run_1_no_mito, "Run2" = run_2_no_mito)
+seurat_obj_list <- list("Run1" = run_1_no_mito_filtered, "Run2" = run_2_no_mito_filtered)
 
 # Assign identity to the cells based on the run
 merged_obj <- merge(
-  x = run_1_no_mito,
-  y = run_1_no_mito,
+  x = run_1_no_mito_filtered,
+  y = run_2_no_mito_filtered,
   add.cell.ids = c("Run_1", "Run_2") # optional: prefix cell names
 )
 
@@ -99,7 +99,7 @@ DimPlot(integrated_run, reduction = "umap", group.by = "Run_Number",
         cols = c("#FFD700", "#5c7650", "green", "#e94560"))
 
 # Visualize the subclusters UMAP
-DimPlot(heidelberg_filtered_seurat_99_adjusted_gf, reduction = "umap",
+DimPlot(integrated_run, reduction = "umap",
                           label.box = TRUE,
                           label = TRUE,
                           label.size = 4)
@@ -132,12 +132,12 @@ integrated_run <- ScaleData(integrated_run)
 
 # Visualize the markers
 FeaturePlot(integrated_run, features = markers_part1)
-FeaturePlot(integrated_seurat_sct, features = markers_part2)
+FeaturePlot(integrated_run, features = markers_part2)
 
 # Identify markers between the P6 and P2 subclusters
-Idents(integrated_seurat_sct) <- integrated_seurat_sct$integrated_snn_res.0.2
+Idents(integrated_run) <- integrated_run$integrated_snn_res.0.2
 
-cluster.P2.P6.markers <- FindMarkers(integrated_seurat_sct, 
+cluster.P2.P6.markers <- FindMarkers(integrated_run, 
                                   ident.1 = c(0, 4, 5, 6, 7), 
                                   ident.2 = c(1, 2, 3, 8),
                                   only.pos = FALSE,
