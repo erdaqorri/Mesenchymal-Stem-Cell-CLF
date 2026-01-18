@@ -1,7 +1,9 @@
 # Code to reproduce the results of our analysis
 
 ---
+**Update**: Our study has now been published in *Scientific Reports* and can be accessed using the following link: https://doi.org/10.1038/s41598-025-30633-x
 
+---
 This repository contains the code for the project *Comprehensive Bulk and Single-Cell RNA Sequencing Uncovers Senescence-Associated Biomarkers in Therapeutic Mesenchymal Stem Cells.* 
 
 It includes scripts for:  
